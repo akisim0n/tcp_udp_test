@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"tcp_upd_test/tcp"
 	"tcp_upd_test/udp"
@@ -16,27 +17,25 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	switch len(os.Args) {
-	case 1:
-		fmt.Println("Usage: tcp_upd_test <protocol type ('tcp', 'udp')> <port number ('8080', '54321')>")
-		os.Exit(1)
-	case 2:
-		fmt.Println("Usage: tcp_upd_test <protocol type ('tcp', 'udp')> <port number ('8080', '54321')>")
-		os.Exit(1)
-	}
 	if len(os.Args) < 3 {
-
+		fmt.Println("Usage: tcp_upd_test <protocol type ('tcp', 'udp')> <port number ('8080', '54321')>")
+		os.Exit(1)
 	}
 	protocolType := os.Args[1]
+	port, portConvErr := strconv.Atoi(os.Args[2])
+	if portConvErr != nil {
+		fmt.Println("Port should be an integer")
+		os.Exit(1)
+	}
 
 	switch protocolType {
 	case "tcp":
-		err := tcp.StartTCPServer(ctx, "", 8080)
+		err := tcp.StartTCPServer(ctx, "", port)
 		if err != nil {
 			log.Fatal(err)
 		}
 	case "udp":
-		err := udp.StartUDPServer(ctx, "", 8081)
+		err := udp.StartUDPServer(ctx, "", port)
 		if err != nil {
 			log.Fatal(err)
 		}
