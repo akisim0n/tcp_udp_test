@@ -6,12 +6,13 @@ import (
 	"log"
 	"net"
 	"os"
+	"tcp_upd_test/utils"
 )
 
 const bufSize = 4096
 
 func StartUDPServer(ctx context.Context, addr string, port int) error {
-	udpConn, updErr := net.ListenPacket("udp", fmt.Sprintf("%s:%d", addr, port))
+	udpConn, updErr := net.ListenPacket("udp", utils.CreateServerAddress(addr, port))
 	if updErr != nil {
 		log.Println("Error starting UDP Server:", updErr)
 		return updErr

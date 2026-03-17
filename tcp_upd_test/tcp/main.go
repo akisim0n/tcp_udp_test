@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"tcp_upd_test/utils"
 )
 
 const bufSize = 4096
 
 func StartTCPServer(ctx context.Context, addr string, port int) error {
-	tcpLis, tcpErr := net.Listen("tcp", fmt.Sprintf("%s:%d", addr, port))
+	tcpLis, tcpErr := net.Listen("tcp", utils.CreateServerAddress(addr, port))
 	if tcpErr != nil {
 		return tcpErr
 	}
