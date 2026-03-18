@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"tcp_upd_test/database"
@@ -16,7 +17,7 @@ func StartHTTPServer(ctx context.Context, addr string, port int) error {
 
 	db, err := database.NewDBConnection(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("db connection error: %w", err)
 	}
 
 	userRepository := userRepo.NewRepository(db)
@@ -35,7 +36,7 @@ func StartHTTPServer(ctx context.Context, addr string, port int) error {
 	log.Printf("start http server at %s:%d", addr, port)
 	lisErr := http.ListenAndServe(utils.CreateServerAddress(addr, port), router)
 	if lisErr != nil {
-		return lisErr
+		return fmt.Errorf("start http server err:%v", lisErr)
 	}
 
 	return nil

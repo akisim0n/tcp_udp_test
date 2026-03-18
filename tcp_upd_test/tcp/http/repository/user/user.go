@@ -21,39 +21,43 @@ type repo struct {
 	DB *pgxpool.Pool
 }
 
-type queryData struct {
-	Text string
-	Args []interface{}
-}
-
 func NewRepository(db *pgxpool.Pool) repository.UserRepository {
 	return &repo{DB: db}
 }
 
 func (r *repo) Get(ctx context.Context, id int64) (*models.User, error) {
 
-	var user models.User
+	user := &models.User{}
 
-	execErr := r.DB.QueryRow(ctx, "SELECT * FROM $1 WHERE id = $2", tableName, id).Scan(&user)
-	if execErr != nil {
-		return nil, execErr
+	bBuilder := builders.NewBatchBuilder()
+	getQ := bBuilder.AddQuery(&user.ID, &user.Data.Name, &user.Data.Surname, &user.Data.Email, &user.Data.Age, &user.CreatedAt, &user.UpdatedAt)
+	getQ(fmt.Sprintf("SELECT id, name, surname, email, age, created_at, updated_at FROM %s WHERE id = $1", tableName), id)
+
+	batchErr := r.WithTxWithBatch(ctx, bBuilder)
+	if batchErr != nil {
+		return nil, fmt.Errorf("get: %w", batchErr)
 	}
 
-	return &user, nil
+	return user, nil
 }
 func (r *repo) GetAll(ctx context.Context) ([]*models.User, error) {
 
-	rowData, execErr := r.DB.Query(ctx, "SELECT * FROM users")
-	if execErr != nil {
-		return nil, execErr
+	var rowsData pgx.Rows
+
+	bBuilder := builders.NewBatchBuilder()
+	getQ := bBuilder.AddQuery(&rowsData)
+	getQ("SELECT * FROM users")
+
+	batchErr := r.WithTxWithBatch(ctx, bBuilder)
+	if batchErr != nil {
+		return nil, fmt.Errorf("getAll: %w", batchErr)
 	}
-	defer rowData.Close()
 
 	var users []*models.User
 
-	for rowData.Next() {
+	for rowsData.Next() {
 		var user models.User
-		if scanErr := rowData.Scan(&user); scanErr != nil {
+		if scanErr := rowsData.Scan(&user); scanErr != nil {
 			return nil, scanErr
 		}
 		users = append(users, &user)
@@ -104,21 +108,22 @@ func (r *repo) Update(ctx context.Context, user *models.User) error {
 
 	queryValue = append(queryValue, userId)
 
-	updateQuery := queryData{
-		Text: queryText,
-		Args: queryValue,
-	}
+	bBuilder := builders.NewBatchBuilder()
+	updateQ := bBuilder.AddExec()
+	updateQ(queryText, queryValue...)
 
-	return r.ExecUnderTransaction(ctx, updateQuery)
+	return r.WithTxWithBatch(ctx, bBuilder)
 }
 func (r *repo) Create(ctx context.Context, user *models.User) (int64, error) {
 
+	var newUserId int64
 	password := user.Data.Password
 	hexPassword, hashErr := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if hashErr != nil {
 		return 0, errors.New(fmt.Sprintf("error hashing password: %s", hashErr))
 	}
 	builder := builders.NewInsertBuilder(tableName)
+	bBuilder := builders.NewBatchBuilder()
 
 	builder.Set("name", user.Data.Name)
 	builder.Set("email", user.Data.Email)
@@ -134,54 +139,59 @@ func (r *repo) Create(ctx context.Context, user *models.User) (int64, error) {
 
 	queryText, args := builder.Build()
 
-	execErr := r.ExecUnderTransaction(ctx, queryData{Text: queryText, Args: args})
+	insertQ := bBuilder.AddQuery(&newUserId)
+	insertQ(queryText, args)
+
+	execErr := r.WithTxWithBatch(ctx, bBuilder)
 	if execErr != nil {
-		return 0, execErr
+		return 0, fmt.Errorf("error executing insert query: %s", execErr)
 	}
 
-	return 0, nil
+	return newUserId, nil
 }
 func (r *repo) Delete(ctx context.Context, id int64) error {
 
 	queryText := fmt.Sprintf("DELETE FROM %s WHERE id = $1", tableName)
 
-	return r.ExecUnderTransaction(ctx, queryData{Text: queryText, Args: []interface{}{id}})
-}
-
-func (r *repo) ExecUnderTransaction(ctx context.Context, queryArgs ...queryData) error {
-	trans, err := r.DB.Begin(ctx)
-	if err != nil {
-		return errors.New(fmt.Sprintf("error starting transaction: %s", err))
-	}
-
-	batch := &pgx.Batch{}
-
-	for _, queryArg := range queryArgs {
-		batch.Queue(queryArg.Text, queryArg.Args...)
-	}
-
-	res := trans.SendBatch(ctx, batch)
-
-	for i := 0; i < batch.Len(); i++ {
-		_, execErr := res.Exec()
-		if execErr != nil {
-			for j := i + 1; j < batch.Len(); j++ {
-				_, _ = res.Exec()
-			}
-			res.Close()
-			trans.Rollback(ctx)
-			return errors.New(fmt.Sprintf("error executing batch result: %s", execErr))
-		}
-	}
-
-	resCloseErr := res.Close()
-	if resCloseErr != nil {
-		trans.Rollback(ctx)
-		return errors.New(fmt.Sprintf("error closing batch result: %s", resCloseErr))
-	}
-	commitErr := trans.Commit(ctx)
-	if commitErr != nil {
-		return errors.New(fmt.Sprintf("error commiting transaction: %s", commitErr))
+	execErr := r.WithTx(ctx, func(tx pgx.Tx) error {
+		_, txErr := tx.Exec(ctx, queryText, id)
+		return txErr
+	})
+	if execErr != nil {
+		return fmt.Errorf("error while deleting user: %s", execErr.Error())
 	}
 	return nil
+}
+
+func (r *repo) WithTxWithBatch(ctx context.Context, bb *builders.BatchBuilder) error {
+	tx, txBeginErr := r.DB.Begin(ctx)
+	if txBeginErr != nil {
+		return fmt.Errorf("error starting transaction: %s", txBeginErr)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	batchErr := bb.Run(ctx, tx)
+	if batchErr != nil {
+		return fmt.Errorf("error batching transaction: %s", batchErr)
+	}
+
+	return tx.Commit(ctx)
+}
+
+func (r *repo) WithTx(ctx context.Context, fn func(tx pgx.Tx) error) error {
+	tx, txBeginErr := r.DB.Begin(ctx)
+	if txBeginErr != nil {
+		return fmt.Errorf("error starting transaction: %s", txBeginErr)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	if execErr := fn(tx); execErr != nil {
+		return execErr
+	}
+
+	return tx.Commit(ctx)
 }
