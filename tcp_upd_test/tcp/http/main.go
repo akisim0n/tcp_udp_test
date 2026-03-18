@@ -11,9 +11,16 @@ import (
 	userRepo "tcp_upd_test/tcp/http/repository/user"
 	userServ "tcp_upd_test/tcp/http/service/user"
 	"tcp_upd_test/utils"
+
+	"github.com/joho/godotenv"
 )
 
 func StartHTTPServer(ctx context.Context, addr string, port int) error {
+
+	envErr := godotenv.Load("http.env")
+	if envErr != nil {
+		log.Fatal("Error loading http.env file")
+	}
 
 	db, err := database.NewDBConnection(ctx)
 	if err != nil {

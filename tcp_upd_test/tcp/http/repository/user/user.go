@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
+	"log"
 	"strconv"
 	"strings"
 	"tcp_upd_test/tcp/http/models"
 	"tcp_upd_test/tcp/http/repository"
 	"tcp_upd_test/tcp/http/repository/builders"
+	"tcp_upd_test/utils"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -25,11 +26,10 @@ type repo struct {
 }
 
 func NewRepository(db *pgxpool.Pool) repository.UserRepository {
-	var salt int
-	if value, ok := os.LookupEnv("HEX_SALT"); ok {
-		salt, _ = strconv.Atoi(value)
-	} else {
+	salt, convErr := strconv.Atoi(utils.GetEnvParam("HEX_SALT"))
+	if convErr != nil {
 		salt = bcrypt.DefaultCost
+		log.Print("Salt not set correctly")
 	}
 
 	return &repo{DB: db, salt: salt}
@@ -40,7 +40,7 @@ func (r *repo) Get(ctx context.Context, id int64) (*models.User, error) {
 	user := &models.User{}
 
 	bBuilder := builders.NewBatchBuilder()
-	getQ := bBuilder.AddQuery(&user.ID, &user.Data.Name, &user.Data.Surname, &user.Data.Email, &user.Data.Age, &user.CreatedAt, &user.UpdatedAt)
+	getQ := bBuilder.AddQueryRow(&user.ID, &user.Data.Name, &user.Data.Surname, &user.Data.Email, &user.Data.Age, &user.CreatedAt, &user.UpdatedAt)
 	getQ(fmt.Sprintf("SELECT id, name, surname, email, age, created_at, updated_at FROM %s WHERE id = $1", tableName), id)
 
 	batchErr := r.WithTxWithBatch(ctx, bBuilder)
@@ -56,7 +56,7 @@ func (r *repo) GetAll(ctx context.Context) ([]*models.User, error) {
 
 	bBuilder := builders.NewBatchBuilder()
 	getQ := bBuilder.AddQuery(&rowsData)
-	getQ("SELECT * FROM users")
+	getQ("SELECT id, name, surname, age, updated_at, created_at, email FROM users")
 
 	batchErr := r.WithTxWithBatch(ctx, bBuilder)
 	if batchErr != nil {
@@ -66,12 +66,13 @@ func (r *repo) GetAll(ctx context.Context) ([]*models.User, error) {
 	var users []*models.User
 
 	for rowsData.Next() {
-		var user models.User
-		if scanErr := rowsData.Scan(&user); scanErr != nil {
+		user := models.User{}
+		if scanErr := rowsData.Scan(&user.ID, &user.Data.Name, &user.Data.Surname, &user.Data.Age, &user.UpdatedAt, &user.CreatedAt, &user.Data.Email); scanErr != nil {
 			return nil, scanErr
 		}
 		users = append(users, &user)
 	}
+	defer rowsData.Close()
 
 	return users, nil
 }
@@ -147,10 +148,12 @@ func (r *repo) Create(ctx context.Context, user *models.User) (int64, error) {
 		builder.Set("age", *user.Data.Age)
 	}
 
+	builder.SetReturning("id")
+
 	queryText, args := builder.Build()
 
-	insertQ := bBuilder.AddQuery(&newUserId)
-	insertQ(queryText, args)
+	insertQ := bBuilder.AddQueryRow(&newUserId)
+	insertQ(queryText, args...)
 
 	execErr := r.WithTxWithBatch(ctx, bBuilder)
 	if execErr != nil {

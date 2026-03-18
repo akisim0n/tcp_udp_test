@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
+	"tcp_upd_test/utils"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -12,12 +12,12 @@ import (
 // NewDBConnection do not forget to close connection
 func NewDBConnection(ctx context.Context) (*pgxpool.Pool, error) {
 
-	dbConfig := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
-		getEnv("DB_HOST"),
-		getEnv("DB_PORT"),
-		getEnv("DB_USER"),
-		getEnv("DB_PASSWORD"),
-		getEnv("DB_NAME"))
+	dbConfig := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+		utils.GetEnvParam("DB_HOST"),
+		utils.GetEnvParam("DB_PORT"),
+		utils.GetEnvParam("DB_USER"),
+		utils.GetEnvParam("DB_PASSWORD"),
+		utils.GetEnvParam("DB_NAME"))
 
 	pgx, pgxErr := pgxpool.New(ctx, dbConfig)
 	if pgxErr != nil {
@@ -30,11 +30,4 @@ func NewDBConnection(ctx context.Context) (*pgxpool.Pool, error) {
 	}
 
 	return pgx, nil
-}
-
-func getEnv(key string) string {
-	if value, ok := os.LookupEnv(key); ok {
-		return value
-	}
-	return ""
 }

@@ -15,12 +15,24 @@ func NewBatchBuilder() *BatchBuilder {
 	return &BatchBuilder{batch: &pgx.Batch{}}
 }
 
-func (b *BatchBuilder) AddQuery(retArgs ...any) func(query string, args ...any) {
+func (b *BatchBuilder) AddQueryRow(retArgs ...any) func(query string, args ...any) {
 	return func(query string, args ...any) {
 		b.batch.Queue(query, args...)
 
 		b.readers = append(b.readers, func(rows pgx.BatchResults) error {
 			return rows.QueryRow().Scan(retArgs...)
+		})
+	}
+}
+
+func (b *BatchBuilder) AddQuery(retRows *pgx.Rows) func(query string, args ...any) {
+	return func(query string, args ...any) {
+		b.batch.Queue(query, args...)
+
+		b.readers = append(b.readers, func(rows pgx.BatchResults) error {
+			var execErr error
+			*retRows, execErr = rows.Query()
+			return execErr
 		})
 	}
 }
