@@ -9,14 +9,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const (
-	host     = "localhost"
-	port     = 5432
-	user     = "postgres"
-	password = "Egalam47"
-	dbname   = "test_http"
-)
-
 // NewDBConnection do not forget to close connection
 func NewDBConnection(ctx context.Context) (*pgxpool.Pool, error) {
 
