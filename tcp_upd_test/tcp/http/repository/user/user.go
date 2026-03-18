@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"tcp_upd_test/tcp/http/models"
 	"tcp_upd_test/tcp/http/repository"
@@ -18,11 +20,19 @@ import (
 const tableName = "users"
 
 type repo struct {
-	DB *pgxpool.Pool
+	DB   *pgxpool.Pool
+	salt int
 }
 
 func NewRepository(db *pgxpool.Pool) repository.UserRepository {
-	return &repo{DB: db}
+	var salt int
+	if value, ok := os.LookupEnv("HEX_SALT"); ok {
+		salt, _ = strconv.Atoi(value)
+	} else {
+		salt = bcrypt.DefaultCost
+	}
+
+	return &repo{DB: db, salt: salt}
 }
 
 func (r *repo) Get(ctx context.Context, id int64) (*models.User, error) {
@@ -118,7 +128,7 @@ func (r *repo) Create(ctx context.Context, user *models.User) (int64, error) {
 
 	var newUserId int64
 	password := user.Data.Password
-	hexPassword, hashErr := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hexPassword, hashErr := bcrypt.GenerateFromPassword([]byte(password), r.salt)
 	if hashErr != nil {
 		return 0, errors.New(fmt.Sprintf("error hashing password: %s", hashErr))
 	}
