@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"net/http"
+
+	"github.com/go-chi/chi/v5"
 )
 
 type UserHandler interface {
@@ -10,4 +12,5 @@ type UserHandler interface {
 	UserUpdate(http.ResponseWriter, *http.Request)
 	UserDelete(http.ResponseWriter, *http.Request)
 	UserCreate(http.ResponseWriter, *http.Request)
+	Routes() chi.Router
 }

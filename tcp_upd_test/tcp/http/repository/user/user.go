@@ -40,7 +40,7 @@ func (r *repo) Get(ctx context.Context, id int64) (*models.User, error) {
 	user := &models.User{}
 
 	bBuilder := builders.NewBatchBuilder()
-	getQ := bBuilder.AddQueryRow(&user.ID, &user.Data.Name, &user.Data.Surname, &user.Data.Email, &user.Data.Age, &user.CreatedAt, &user.UpdatedAt)
+	getQ := bBuilder.AddQueryRow(&user.ID, &user.Name, &user.Surname, &user.Email, &user.Age, &user.CreatedAt, &user.UpdatedAt)
 	getQ(fmt.Sprintf("SELECT id, name, surname, email, age, created_at, updated_at FROM %s WHERE id = $1", tableName), id)
 
 	batchErr := r.WithTxWithBatch(ctx, bBuilder)
@@ -52,22 +52,16 @@ func (r *repo) Get(ctx context.Context, id int64) (*models.User, error) {
 }
 func (r *repo) GetAll(ctx context.Context) ([]*models.User, error) {
 
-	var rowsData pgx.Rows
-
-	bBuilder := builders.NewBatchBuilder()
-	getQ := bBuilder.AddQuery(&rowsData)
-	getQ("SELECT id, name, surname, age, updated_at, created_at, email FROM users")
-
-	batchErr := r.WithTxWithBatch(ctx, bBuilder)
-	if batchErr != nil {
-		return nil, fmt.Errorf("getAll: %w", batchErr)
+	rowsData, execErr := r.DB.Query(ctx, "SELECT id, name, surname, age, updated_at, created_at, email FROM users")
+	if execErr != nil {
+		return nil, fmt.Errorf("getAll: %w", execErr)
 	}
 
 	var users []*models.User
 
 	for rowsData.Next() {
 		user := models.User{}
-		if scanErr := rowsData.Scan(&user.ID, &user.Data.Name, &user.Data.Surname, &user.Data.Age, &user.UpdatedAt, &user.CreatedAt, &user.Data.Email); scanErr != nil {
+		if scanErr := rowsData.Scan(&user.ID, &user.Name, &user.Surname, &user.Age, &user.UpdatedAt, &user.CreatedAt, &user.Email); scanErr != nil {
 			return nil, scanErr
 		}
 		users = append(users, &user)
@@ -83,27 +77,27 @@ func (r *repo) Update(ctx context.Context, user *models.User) error {
 	var queryValue []interface{}
 	argsPos := 1
 
-	if user.Data.Name != "" {
+	if user.Name != "" {
 		queryArgs = append(queryArgs, fmt.Sprintf("name = &%d", argsPos))
-		queryValue = append(queryValue, user.Data.Name)
+		queryValue = append(queryValue, user.Name)
 		argsPos++
 	}
 
-	if user.Data.Age != nil {
+	if user.Age != nil {
 		queryArgs = append(queryArgs, fmt.Sprintf("age = &%d", argsPos))
-		queryValue = append(queryValue, *user.Data.Age)
+		queryValue = append(queryValue, *user.Age)
 		argsPos++
 	}
 
-	if user.Data.Surname != nil {
+	if user.Surname != nil {
 		queryArgs = append(queryArgs, fmt.Sprintf("surname = &%d", argsPos))
-		queryValue = append(queryValue, *user.Data.Surname)
+		queryValue = append(queryValue, *user.Surname)
 		argsPos++
 	}
 
-	if user.Data.Email != "" {
+	if user.Email != "" {
 		queryArgs = append(queryArgs, fmt.Sprintf("email = &%d", argsPos))
-		queryValue = append(queryValue, user.Data.Email)
+		queryValue = append(queryValue, user.Email)
 		argsPos++
 	}
 
@@ -128,7 +122,7 @@ func (r *repo) Update(ctx context.Context, user *models.User) error {
 func (r *repo) Create(ctx context.Context, user *models.User) (int64, error) {
 
 	var newUserId int64
-	password := user.Data.Password
+	password := user.Password
 	hexPassword, hashErr := bcrypt.GenerateFromPassword([]byte(password), r.salt)
 	if hashErr != nil {
 		return 0, errors.New(fmt.Sprintf("error hashing password: %s", hashErr))
@@ -136,16 +130,16 @@ func (r *repo) Create(ctx context.Context, user *models.User) (int64, error) {
 	builder := builders.NewInsertBuilder(tableName)
 	bBuilder := builders.NewBatchBuilder()
 
-	builder.Set("name", user.Data.Name)
-	builder.Set("email", user.Data.Email)
+	builder.Set("name", user.Name)
+	builder.Set("email", user.Email)
 	builder.Set("password", string(hexPassword))
 	builder.Set("updated_at", time.Now())
 
-	if user.Data.Surname != nil {
-		builder.Set("surname", *user.Data.Surname)
+	if user.Surname != nil {
+		builder.Set("surname", *user.Surname)
 	}
-	if user.Data.Age != nil {
-		builder.Set("age", *user.Data.Age)
+	if user.Age != nil {
+		builder.Set("age", *user.Age)
 	}
 
 	builder.SetReturning("id")

@@ -6,12 +6,12 @@ import (
 	"log"
 	"net/http"
 	"tcp_upd_test/database"
-	"tcp_upd_test/tcp/http/handlers"
 	userHand "tcp_upd_test/tcp/http/handlers/user"
 	userRepo "tcp_upd_test/tcp/http/repository/user"
 	userServ "tcp_upd_test/tcp/http/service/user"
 	"tcp_upd_test/utils"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/joho/godotenv"
 )
 
@@ -33,7 +33,9 @@ func StartHTTPServer(ctx context.Context, addr string, port int) error {
 
 	userHandler := userHand.NewHandler(userService)
 
-	router := NewRouter(userHandler)
+	router := chi.NewRouter()
+
+	router.Mount("/users", userHandler.Routes())
 
 	go func() {
 		<-ctx.Done()
@@ -47,16 +49,4 @@ func StartHTTPServer(ctx context.Context, addr string, port int) error {
 	}
 
 	return nil
-}
-
-func NewRouter(handler handlers.UserHandler) http.Handler {
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("/user/", handler.User)
-	mux.HandleFunc("/users", handler.UserList)
-	mux.HandleFunc("/user/delete/", handler.UserDelete)
-	mux.HandleFunc("/user/update", handler.UserUpdate)
-	mux.HandleFunc("/user/create", handler.UserCreate)
-
-	return mux
 }
