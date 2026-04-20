@@ -2,37 +2,29 @@ package user
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"log"
-	"strconv"
 	"strings"
 	"tcp_upd_test/tcp/http/models"
 	"tcp_upd_test/tcp/http/repository"
 	"tcp_upd_test/tcp/http/repository/builders"
-	"tcp_upd_test/utils"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"golang.org/x/crypto/bcrypt"
 )
 
 const tableName = "users"
 
+type db interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
 type repo struct {
-	DB   *pgxpool.Pool
-	salt int
+	DB db
 }
 
 func NewRepository(db *pgxpool.Pool) repository.UserRepository {
-	salt, convErr := strconv.Atoi(utils.GetEnvParam("HEX_SALT"))
-	if convErr != nil {
-		salt = bcrypt.DefaultCost
-		log.Print("Salt not set correctly")
-	}
-
-	return &repo{DB: db, salt: salt}
+	return &repo{DB: db}
 }
 
 func (r *repo) Get(ctx context.Context, id int64) (*models.User, error) {
@@ -71,43 +63,44 @@ func (r *repo) GetAll(ctx context.Context) ([]*models.User, error) {
 	return users, nil
 }
 func (r *repo) Update(ctx context.Context, user *models.User) error {
-
 	userId := user.ID
 	var queryArgs []string
 	var queryValue []interface{}
 	argsPos := 1
 
 	if user.Name != "" {
-		queryArgs = append(queryArgs, fmt.Sprintf("name = &%d", argsPos))
+		queryArgs = append(queryArgs, fmt.Sprintf("name = $%d", argsPos))
 		queryValue = append(queryValue, user.Name)
 		argsPos++
 	}
 
 	if user.Age != nil {
-		queryArgs = append(queryArgs, fmt.Sprintf("age = &%d", argsPos))
+		queryArgs = append(queryArgs, fmt.Sprintf("age = $%d", argsPos))
 		queryValue = append(queryValue, *user.Age)
 		argsPos++
 	}
 
 	if user.Surname != nil {
-		queryArgs = append(queryArgs, fmt.Sprintf("surname = &%d", argsPos))
+		queryArgs = append(queryArgs, fmt.Sprintf("surname = $%d", argsPos))
 		queryValue = append(queryValue, *user.Surname)
 		argsPos++
 	}
 
 	if user.Email != "" {
-		queryArgs = append(queryArgs, fmt.Sprintf("email = &%d", argsPos))
+		queryArgs = append(queryArgs, fmt.Sprintf("email = $%d", argsPos))
 		queryValue = append(queryValue, user.Email)
 		argsPos++
 	}
 
-	if len(queryArgs) == 0 {
+	if user.UpdatedAt.IsZero() && len(queryArgs) == 0 {
 		return nil
 	}
 
-	queryArgs = append(queryArgs, fmt.Sprintf("updated_at = &%d", argsPos))
-	queryValue = append(queryValue, time.Now())
-	argsPos++
+	if !user.UpdatedAt.IsZero() {
+		queryArgs = append(queryArgs, fmt.Sprintf("updated_at = $%d", argsPos))
+		queryValue = append(queryValue, user.UpdatedAt)
+		argsPos++
+	}
 
 	queryText := fmt.Sprintf("UPDATE %s SET %s WHERE id = $%d", tableName, strings.Join(queryArgs, ", "), argsPos)
 
@@ -120,20 +113,15 @@ func (r *repo) Update(ctx context.Context, user *models.User) error {
 	return r.WithTxWithBatch(ctx, bBuilder)
 }
 func (r *repo) Create(ctx context.Context, user *models.User) (int64, error) {
-
 	var newUserId int64
-	password := user.Password
-	hexPassword, hashErr := bcrypt.GenerateFromPassword([]byte(password), r.salt)
-	if hashErr != nil {
-		return 0, errors.New(fmt.Sprintf("error hashing password: %s", hashErr))
-	}
 	builder := builders.NewInsertBuilder(tableName)
 	bBuilder := builders.NewBatchBuilder()
 
 	builder.Set("name", user.Name)
 	builder.Set("email", user.Email)
-	builder.Set("password", string(hexPassword))
-	builder.Set("updated_at", time.Now())
+	builder.Set("password", user.Password)
+	builder.Set("created_at", user.CreatedAt)
+	builder.Set("updated_at", user.UpdatedAt)
 
 	if user.Surname != nil {
 		builder.Set("surname", *user.Surname)

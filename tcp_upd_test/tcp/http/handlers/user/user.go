@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+
 	c "tcp_upd_test/tcp/http/converters"
 	"tcp_upd_test/tcp/http/handlers"
 	"tcp_upd_test/tcp/http/models"
@@ -49,74 +50,49 @@ func (h *handler) Routes() chi.Router {
 
 func (h *handler) User(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id := chi.URLParam(r, "id")
-	var err error
-	var idInt64 int64
-	defer func() {
-		if err != nil {
-			createServerErr(w, fmt.Sprintf("user get error: %v", err))
-		}
-	}()
-
-	idInt64, err = strconv.ParseInt(id, 10, 64)
+	idInt64, err := parseIDParam(r)
 	if err != nil {
+		createServerErr(w, fmt.Sprintf("user get error: %v", err))
 		return
 	}
 
-	var user *models.User
-
-	user, err = h.serv.Get(ctx, idInt64)
+	user, err := h.serv.Get(ctx, idInt64)
 	if err != nil {
+		createServerErr(w, fmt.Sprintf("user get error: %v", err))
 		return
 	}
 
 	userResp := c.FromUserToCreateUserResponse(*user)
-
 	utils.WriteJSON(w, http.StatusOK, userResp)
 }
 
 func (h *handler) UserUpdate(w http.ResponseWriter, r *http.Request) {
 	var user models.User
 	ctx := r.Context()
-	var err error
-	defer func() {
-		if err != nil {
-			createServerErr(w, fmt.Sprintf("user update error: %v", err))
-		}
-	}()
-	err = json.NewDecoder(r.Body).Decode(&user)
-	if err != nil {
+	if err := decodeJSON(r, &user); err != nil {
+		createServerErr(w, fmt.Sprintf("user update error: %v", err))
 		return
 	}
 
-	err = h.serv.Update(ctx, &user)
-	if err != nil {
+	if err := h.serv.Update(ctx, &user); err != nil {
+		createServerErr(w, fmt.Sprintf("user update error: %v", err))
 		return
 	}
 
 	userResp := c.FromUserToUserResponse(user)
-
 	utils.WriteJSON(w, http.StatusOK, userResp)
 }
 
 func (h *handler) UserDelete(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id := chi.URLParam(r, "id")
-	var err error
-	var idInt64 int64
-	defer func() {
-		if err != nil {
-			createServerErr(w, fmt.Sprintf("user delete error: %v", err))
-		}
-	}()
-
-	idInt64, err = strconv.ParseInt(id, 10, 64)
+	idInt64, err := parseIDParam(r)
 	if err != nil {
+		createServerErr(w, fmt.Sprintf("user delete error: %v", err))
 		return
 	}
 
-	err = h.serv.Delete(ctx, idInt64)
-	if err != nil {
+	if err := h.serv.Delete(ctx, idInt64); err != nil {
+		createServerErr(w, fmt.Sprintf("user delete error: %v", err))
 		return
 	}
 
@@ -125,20 +101,16 @@ func (h *handler) UserDelete(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) UserList(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	var err error
-	defer func() {
-		if err != nil {
-			createServerErr(w, fmt.Sprintf("getting users error: %v", err))
-		}
-	}()
-	var users []*models.User
-
-	users, err = h.serv.GetAll(ctx)
+	users, err := h.serv.GetAll(ctx)
 	if err != nil {
+		createServerErr(w, fmt.Sprintf("getting users error: %v", err))
 		return
 	}
 
-	var usersListResponse dto.UserListResponse
+	usersListResponse := dto.UserListResponse{
+		Users: make([]dto.UserResponse, 0, len(users)),
+	}
+
 	for _, user := range users {
 		userResp := c.FromUserToUserResponse(*user)
 		usersListResponse.Users = append(usersListResponse.Users, userResp)
@@ -150,64 +122,31 @@ func (h *handler) UserList(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) UserCreate(w http.ResponseWriter, r *http.Request) {
 	var reqUser dto.CreateUserRequest
-	var err error
-	validateErr := dto.ValidationErrorResponse{}
 	ctx := r.Context()
 
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-
-	defer r.Body.Close()
-	defer func() {
-		if err != nil {
-			createServerErr(w, fmt.Sprintf("Create User Error: %v", err))
-		}
-	}()
-
-	if err = decoder.Decode(&reqUser); err != nil {
+	if err := decodeJSON(r, &reqUser); err != nil {
+		createServerErr(w, fmt.Sprintf("Create User Error: %v", err))
 		return
 	}
 
-	if reqUser.Name == nil {
-		fieldErr := dto.FieldError{
-			Field:   "name",
-			Message: fmt.Sprintf("Field 'name' is required"),
-		}
-		validateErr.Error.Fields = append(validateErr.Error.Fields, fieldErr)
-	}
-
-	if reqUser.Email == nil {
-		fieldErr := dto.FieldError{
-			Field:   "email",
-			Message: fmt.Sprintf("Field 'email' is required"),
-		}
-		validateErr.Error.Fields = append(validateErr.Error.Fields, fieldErr)
-	}
-
-	if reqUser.Password == nil {
-		fieldErr := dto.FieldError{
-			Field:   "password",
-			Message: fmt.Sprintf("Field 'password' is required"),
-		}
-		validateErr.Error.Fields = append(validateErr.Error.Fields, fieldErr)
-	}
-
-	if validateErr.Error.Fields != nil && len(validateErr.Error.Fields) > 0 {
+	validateErr := validateCreateUserRequest(reqUser)
+	if len(validateErr.Error.Fields) > 0 {
 		validateErr.Error.Code = validationErrCode
-		validateErr.Error.Message = fmt.Sprint("invalid request data")
+		validateErr.Error.Message = "invalid request data"
 		utils.WriteJSON(w, http.StatusBadRequest, validateErr)
 		return
 	}
 
 	user := c.FromCreateUserRequestToUser(reqUser)
 
-	user.ID, err = h.serv.Create(ctx, &user)
+	id, err := h.serv.Create(ctx, &user)
 	if err != nil {
+		createServerErr(w, fmt.Sprintf("Create User Error: %v", err))
 		return
 	}
+	user.ID = id
 
 	respUser := dto.CreateUserResponse{Id: user.ID}
-
 	utils.WriteJSON(w, http.StatusCreated, respUser)
 }
 
@@ -217,4 +156,42 @@ func createServerErr(w http.ResponseWriter, errorMsg string) {
 		Message: errorMsg,
 	}
 	utils.WriteJSON(w, http.StatusBadRequest, serverErr)
+}
+
+func parseIDParam(r *http.Request) (int64, error) {
+	return strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+}
+
+func decodeJSON(r *http.Request, target any) error {
+	defer r.Body.Close()
+
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+
+	return decoder.Decode(target)
+}
+
+func validateCreateUserRequest(req dto.CreateUserRequest) dto.ValidationErrorResponse {
+	var validateErr dto.ValidationErrorResponse
+
+	if req.Name == nil {
+		validateErr.Error.Fields = append(validateErr.Error.Fields, requiredFieldError("name"))
+	}
+
+	if req.Email == nil {
+		validateErr.Error.Fields = append(validateErr.Error.Fields, requiredFieldError("email"))
+	}
+
+	if req.Password == nil {
+		validateErr.Error.Fields = append(validateErr.Error.Fields, requiredFieldError("password"))
+	}
+
+	return validateErr
+}
+
+func requiredFieldError(field string) dto.FieldError {
+	return dto.FieldError{
+		Field:   field,
+		Message: fmt.Sprintf("Field '%s' is required", field),
+	}
 }
